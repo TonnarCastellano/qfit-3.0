@@ -855,37 +855,29 @@ class QFitRotamericResidue(_BaseQFit):
         new_bs = []
         for coor in self._coor_set:
             self.residue.coor = coor
+            rotator = CBAngleRotator(self.residue)
             # Initialize rotator
-            perp_rotator = CBAngleRotator(self.residue)
-            # Rotate about the axis perpendicular to CB-CA and CB-CG vectors
-            for perp_angle in angles:
-                perp_rotator(perp_angle)
-                coor_rotated = self.residue.coor
-                # Initialize rotator
-                bisec_rotator = BisectingAngleRotator(self.residue)
-                # Rotate about the axis bisecting the CA-CA-CG angle for each angle you sample across the perpendicular axis
-                for bisec_angle in angles:
-                    self.residue.coor = coor_rotated  # Ensure that the second rotation is applied to the updated coordinates from first rotation
-                    bisec_rotator(bisec_angle)
-                    coor = self.residue.coor
+            for angle in angles:
+                rotator(angle)
+                coor = self.residue.coor
 
-                    # Move on if these coordinates are unsupported by density
-                    if self.options.remove_conformers_below_cutoff:
-                        values = self.xmap.interpolate(coor[active_mask])
-                        mask = self.residue.e[active_mask] != "H"
-                        if np.min(values[mask]) < self.options.density_cutoff:
-                            continue
-
-                    # Move on if these coordinates cause a clash
-                    if self.options.external_clash:
-                        if self._cd() and self.residue.clashes():
-                            continue
-                    elif self.residue.clashes():
+                # Move on if these coordinates are unsupported by density
+                if self.options.remove_conformers_below_cutoff:
+                    values = self.xmap.interpolate(coor[active_mask])
+                    mask = self.residue.e[active_mask] != "H"
+                    if np.min(values[mask]) < self.options.density_cutoff:
                         continue
 
-                    # Valid, non-clashing conformer found!
-                    new_coor_set.append(self.residue.coor)
-                    new_bs.append(self.conformer.b)
+                # Move on if these coordinates cause a clash
+                if self.options.external_clash:
+                    if self._cd() and self.residue.clashes():
+                        continue
+                elif self.residue.clashes():
+                    continue
+
+                # Valid, non-clashing conformer found!
+                new_coor_set.append(self.residue.coor)
+                new_bs.append(self.conformer.b)
 
         # Update sampled coords
         self._coor_set = new_coor_set
