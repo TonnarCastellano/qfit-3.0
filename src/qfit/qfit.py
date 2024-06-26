@@ -270,16 +270,24 @@ class _BaseQFit(ABC):
         self._subtransformer.initialize()
         self._subtransformer.reset(full=True)
         self._subtransformer.density()
-        if self.options.em == False:
-            # Set the lowest values in the map to the bulk solvent level:
-            np.maximum(
-                self._subtransformer.xmap.array,
-                self.options.bulk_solvent_level,
-                out=self._subtransformer.xmap.array,
-            )
+        # if self.options.em == False:
+        #     # Set the lowest values in the map to the bulk solvent level:
+        #     np.maximum(
+        #         self._subtransformer.xmap.array,
+        #         self.options.bulk_solvent_level,
+        #         out=self._subtransformer.xmap.array,
+        #     )
 
         # Subtract the density:
         self.xmap.array -= self._subtransformer.xmap.array
+        xmap_mean = self.xmap.array.mean()
+        xmap_std = self.xmap.array.std()
+        k = 0.80
+        threshold = xmap_mean + k * xmap_std
+        print(f'threshold = {threshold}')
+
+        self.xmap.array[self.xmap.array < threshold] = -1.0
+        self.xmap.tofile('exp_map.ccp4')
 
     def _convert(self, stride=1, pool_size=1): #default is to manipulate the maps
         """Convert structures to densities and extract relevant values for (MI)QP."""
