@@ -343,6 +343,10 @@ class _BaseQFit(ABC):
         # set loop range differently for EM
         if self.options.em:
             loop_range = [1.0, 0.5, 0.33, 0.25]
+            
+        #set max number of ligand outputs to be 3
+        if self.options.ligand_bic:
+            cardinality = 3
         # Set the default (from options) if it hasn't been passed as an argument
         if do_BIC_selection is None:
             do_BIC_selection = self.options.bic_threshold
