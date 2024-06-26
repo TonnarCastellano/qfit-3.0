@@ -92,7 +92,7 @@ def build_argparser():
     p.add_argument(
         "-ic",
         "--intermediate-cardinality",
-        default=5,
+        default=3,
         metavar="<int>",
         type=int,
         help="Cardinality constraint used during intermediate MIQP",
@@ -185,10 +185,7 @@ def prepare_qfit_ligand(options):
     if options.scale:
         # Prepare X-ray map
         scaler = MapScaler(xmap, em=options.em)
-        if options.omit:
-            footprint = structure_ligand
-        else:
-            footprint = structure
+        footprint = structure_ligand
         radius = 1.5
         reso = None
         if xmap.resolution.high is not None:
