@@ -324,7 +324,7 @@ class _BaseQFit(ABC):
                 if len(current_window) > 0:
                     pooled_map_values.append(np.max(current_window))
             model[:] = np.array(pooled_map_values)
-            np.maximum(model, self.options.bulk_solvent_level, out=model)
+            #np.maximum(model, self.options.bulk_solvent_level, out=model)
             self._transformer.reset(full=True)
 
     def _solve_qp(self):
