@@ -663,12 +663,6 @@ class _BaseQFit(ABC):
         return rotated_conformations
 
 
-# FIXME consolidate with calc_rmsd
-def _get_coordinate_rmsd(reference_coordinates, new_coordinate_set):
-    delta = np.array(new_coordinate_set) - np.array(reference_coordinates)
-    return np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1)))
-
-
 class QFitRotamericResidue(_BaseQFit):
     def __init__(self, residue, structure, xmap, options):
         super().__init__(residue, structure, xmap, options)
@@ -1179,7 +1173,7 @@ class QFitRotamericResidue(_BaseQFit):
                             # Based on that, decide whether to keep or reject this (partial) conformer
                             if not self.is_clashing():
                                 if new_coor_set:
-                                    rmsd = _get_coordinate_rmsd(self.residue.coor,
+                                    rmsd = calc_rmsd(self.residue.coor,
                                                                 new_coor_set)
                                     if rmsd >= DEFAULT_RMSD_CUTOFF:
                                         new_coor_set.append(self.residue.coor)
