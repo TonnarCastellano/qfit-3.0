@@ -1,4 +1,5 @@
 from abc import ABC
+import time
 import itertools
 import logging
 import os
@@ -123,6 +124,12 @@ class QFitOptions:
         self.numConf = None
         self.smiles = None
         self.ligand_bic = None
+        self.ligand_bic_option1 = None
+        self.ligand_bic_option2 = None
+        self.ligand_bic_option3 = None
+        self.ligand_bic_option4 = None
+        self.ligand_bic_option5 = None
+        self.ligand_rmsd = None
         self.rot_range = None
         self.trans_range = None
         self.rotation_step = None
@@ -150,8 +157,6 @@ class _BaseQFit(ABC):
         self._set_data(conformer, structure, xmap, reset_q=reset_q)
         if self.options.em == True:
             self.options.scattering = "electron"
-            # bulk solvent level is 0 for EM to work with electron SF
-            self.options.bulk_solvent_level = 0
             # maximum of 3 conformers can be choosen per residue
             self.options.cardinality = 3
 
@@ -270,30 +275,24 @@ class _BaseQFit(ABC):
         self._subtransformer.initialize()
         self._subtransformer.reset(full=True)
         self._subtransformer.density()
-        # if self.options.em == False:
-        #     # Set the lowest values in the map to the bulk solvent level:
-        #     np.maximum(
-        #         self._subtransformer.xmap.array,
-        #         self.options.bulk_solvent_level,
-        #         out=self._subtransformer.xmap.array,
-        #     )
+        if self.options.em == False or not self.ligand:
+            # Set the lowest values in the map to the bulk solvent level:
+            np.maximum(
+               self._subtransformer.xmap.array,
+                self.options.bulk_solvent_level,
+                out=self._subtransformer.xmap.array,
+            )
 
         # Subtract the density:
-        self.xmap.array -= self._subtransformer.xmap.array
-        xmap_mean = self.xmap.array.mean()
-        xmap_std = self.xmap.array.std()
-        k = 0.80
-        threshold = xmap_mean + k * xmap_std
-        print(f'threshold = {threshold}')
-
-        self.xmap.array[self.xmap.array < threshold] = -1.0
-        self.xmap.tofile('exp_map.ccp4')
+        self.xmap.array -= self._subtransformer.xmap.array   
 
     def _convert(self, stride=1, pool_size=1): #default is to manipulate the maps
         """Convert structures to densities and extract relevant values for (MI)QP."""
+        start_time = time.time()
         logger.info("Converting conformers to density")
         mask = self._transformer.get_conformers_mask(
             self._coor_set, self._rmask)
+        end_time = time.time()
         nvalues = mask.sum()
         self._target = self.xmap.array[mask]
         
@@ -308,11 +307,12 @@ class _BaseQFit(ABC):
         
         # Convert pooled_values back to a numpy array
         self._target = np.array(pooled_values)
-        
+        start_numpy = time.time()
         logger.debug(f"Transforming to density for {nvalues} map points")
         nmodels = len(self._coor_set)
         maxpool_size = len(range(0, nvalues, stride))
         self._models = np.zeros((nmodels, maxpool_size), float)
+
         for n, (coor, b) in enumerate(zip(self._coor_set, self._bs)):
             density = self._transformer.get_conformer_density(coor, b)
             model = self._models[n]
@@ -324,8 +324,10 @@ class _BaseQFit(ABC):
                 if len(current_window) > 0:
                     pooled_map_values.append(np.max(current_window))
             model[:] = np.array(pooled_map_values)
-            #np.maximum(model, self.options.bulk_solvent_level, out=model)
+            if self.options.em == False or not self.ligand:
+                np.maximum(model, self.options.bulk_solvent_level, out=model)
             self._transformer.reset(full=True)
+        end_time = time.time()
 
     def _solve_qp(self):
         # Create and run solver
@@ -336,7 +338,6 @@ class _BaseQFit(ABC):
 
         # Update occupancies from solver weights
         self._occupancies = solver.weights  # pylint: disable=no-member
-
         # Return solver's objective value (|ρ_obs - Σ(ω ρ_calc)|)
         return solver.objective_value
 
@@ -348,13 +349,10 @@ class _BaseQFit(ABC):
         do_BIC_selection=None,
         segment=None,
     ):
+        start_time = time.time()
         # set loop range differently for EM
         if self.options.em:
             loop_range = [1.0, 0.5, 0.33, 0.25]
-            
-        #set max number of ligand outputs to be 3
-        if self.options.ligand_bic:
-            cardinality = 3
         # Set the default (from options) if it hasn't been passed as an argument
         if do_BIC_selection is None:
             do_BIC_selection = self.options.bic_threshold
@@ -372,19 +370,27 @@ class _BaseQFit(ABC):
             miqp_solutions = []
             for threshold in loop_range:
                 solver.solve_miqp(cardinality=None, threshold=threshold)
-                rss = solver.objective_value * self._voxel_volume
+                rss = solver.objective_value / self._voxel_volume
                 n = len(self._target)
                 natoms = self._coor_set[0].shape[0]
                 nconfs = np.sum(solver.weights >= MIN_OCCUPANCY)  # pylint: disable=no-member
                 model_params_per_atom = 3 + int(self.options.sample_bfactors)
-                k = (
-                    model_params_per_atom * natoms * nconfs * 1.5
+                k = (nconfs * natoms * model_params_per_atom * 1.5
+                    #model_params_per_atom * nconfs #* 1.5
                 )  # hyperparameter 1.5 determined to be the best cut off between too many conformations and improving Rfree
                 if segment is not None:
                     k = nconfs  # for segment, we only care about the number of conformations come out of MIQP. Considering atoms penalizes this too much
-                if self.options.ligand_bic:
-                    k = nconfs * natoms
-                BIC = n * np.log(rss / n) + k * np.log(n)
+                if self.options.self.ligand_bic_option1:
+                    k = (nconfs)
+                if self.options.self.ligand_bic_option2:
+                    k = (nconfs * natoms)
+                if self.options.self.ligand_bic_option3:
+                    k = (nconfs * 3) #models params per atoms
+                if self.options.self.ligand_bic_option4:
+                    k = (nconfs * natoms * 3) #models params per atoms
+                if self.options.self.ligand_bic_option5:
+                    k = (nconfs * natoms * 3 * 1.5) #models params per atoms + same as protein
+                BIC = n * np.log(rss) + (k * np.log(n))
                 solution = MIQPSolutionStats(
                     threshold=threshold,
                     BIC=BIC,
@@ -393,9 +399,11 @@ class _BaseQFit(ABC):
                     weights=solver.weights.copy(),
                 )
                 miqp_solutions.append(solution)
-
+            print(miqp_solutions)
             # Update occupancies from solver weights
             miqp_solution_lowest_bic = min(miqp_solutions, key=lambda sol: sol.BIC)
+            print('lowest miqp')
+            print(miqp_solution_lowest_bic)
             self._occupancies = miqp_solution_lowest_bic.weights  # pylint: disable=no-member
             # Return solver's objective value (|ρ_obs - Σ(ω ρ_calc)|)
             return miqp_solution_lowest_bic.objective_value
@@ -483,10 +491,6 @@ class _BaseQFit(ABC):
         logger.debug("Updating conformers based on occupancy")
 
         # Check that all arrays match dimensions.
-        print(len(self._occupancies))
-        print(len(self._coor_set))
-        print(len(self._bs))
-        
         assert len(self._occupancies) == len(self._coor_set) == len(self._bs)
 
         # Filter all arrays & lists based on self._occupancies
@@ -567,6 +571,22 @@ class _BaseQFit(ABC):
         return ((self.options.external_clash and
                  (self.detect_clashes() or self.primary_entity.clashes() > 0)) or
                 (self.primary_entity.clashes() > 0))
+
+    def _solve_qp_and_update(self, prefix, stride=1, pool_size=1):
+        """QP score conformer occupancy"""
+        self._convert(stride, pool_size)
+        self._solve_qp()
+        self._update_conformers()
+        self._save_intermediate(prefix)
+
+    def _solve_miqp_and_update(self, prefix, stride=1, pool_size=1):
+        # MIQP score conformer occupancy
+        self._convert(stride, pool_size)
+        self._solve_miqp(
+            threshold=self.options.threshold,
+            cardinality=self.options.cardinality)
+        self._update_conformers()
+        self._save_intermediate(prefix=prefix)
 
     def is_same_rotamer(self, rotamer, chis):
         # Check if the residue configuration corresponds to the
@@ -661,6 +681,12 @@ class _BaseQFit(ABC):
                 rotated_conformation = np.dot(conformation - center, rotation_matrix.T) + center
                 rotated_conformations.append(rotated_conformation)
         return rotated_conformations
+
+
+# FIXME consolidate with calc_rmsd
+def _get_coordinate_rmsd(reference_coordinates, new_coordinate_set):
+    delta = np.array(new_coordinate_set) - np.array(reference_coordinates)
+    return np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1)))
 
 
 class QFitRotamericResidue(_BaseQFit):
@@ -851,21 +877,11 @@ class QFitRotamericResidue(_BaseQFit):
             self._bs = new_bs
 
         # QP score conformer occupancy
-        self._convert()
-        self._solve_qp()
-        self._update_conformers()
-        if self.options.write_intermediate_conformers:
-            self._write_intermediate_conformers(prefix="qp_solution")
+        self._solve_qp_and_update(prefix="qp_solution_residue")
 
         # MIQP score conformer occupancy
         self.sample_b()
-        self._convert()
-        self._solve_miqp(
-            threshold=self.options.threshold, cardinality=self.options.cardinality
-        )
-        self._update_conformers()
-        if self.options.write_intermediate_conformers:
-            self._write_intermediate_conformers(prefix="miqp_solution")
+        self._solve_miqp_and_update(prefix="miqp_solution_residue")
 
         # Now that the conformers have been generated, the resulting
         # conformations should be examined via GoodnessOfFit:
@@ -881,9 +897,6 @@ class QFitRotamericResidue(_BaseQFit):
         self.validation_metrics = validator.GoodnessOfFit(
             self.conformer, self._coor_set, self._occupancies, cutoff
         )
-        # End of processing
-        end_time = timeit.default_timer()
-        print(f"Processing time: {end_time - start_time} seconds")
 
     def _sample_backbone(self):
         # Check if residue has enough neighboring residues
@@ -1173,7 +1186,7 @@ class QFitRotamericResidue(_BaseQFit):
                             # Based on that, decide whether to keep or reject this (partial) conformer
                             if not self.is_clashing():
                                 if new_coor_set:
-                                    rmsd = calc_rmsd(self.residue.coor,
+                                    rmsd = _get_coordinate_rmsd(self.residue.coor,
                                                                 new_coor_set)
                                     if rmsd >= DEFAULT_RMSD_CUTOFF:
                                         new_coor_set.append(self.residue.coor)
@@ -1208,13 +1221,13 @@ class QFitRotamericResidue(_BaseQFit):
             )
             self._save_intermediate(f"sample_sidechain_iter{version}_{iteration}")
             
-            if len(self._coor_set) <= 15000:
+            if len(self._coor_set) <= 10000:
                 # If <15000 conformers are generated, QP score conformer occupancy normally
                 self._convert(stride_, pool_size_)
                 self._solve_qp()
                 self._update_conformers()
                 self._save_intermediate(f"sample_sidechain_iter{version}_{iteration}_qp")
-            if len(self._coor_set) > 15000:
+            if len(self._coor_set) > 10000:
                 # If >15000 conformers are generated, split the QP conformer scoring into two
                 temp_coor_set = self._coor_set
                 temp_bs = self._bs
@@ -1388,19 +1401,16 @@ class QFitSegment(_BaseQFit):
 
             # Check to see if the residue has a single conformer:
             if naltlocs == 1:
-                print(f"Found single conformer for {self.segment}")
                 # Process the existing segment
                 if len(segment) > 0:
                     for path in self.find_paths(segment):
                         multiconformers = multiconformers.combine(path)
-                print(multiconformers.natoms)
                 segment = []
                 # Set the occupancy of all atoms of the residue to 1
                 rg.q = np.ones_like(rg.q)
                 # Add the single conformer residue to the
                 # existing multiconformer:
                 multiconformers = multiconformers.combine(rg)
-                print(f"Final {multiconformers.natoms}")
 
             # Check if we need to collapse the backbone
             elif is_single_calpha and is_single_oxygen:
@@ -1420,12 +1430,10 @@ class QFitSegment(_BaseQFit):
 
         # Teardown progress bar
         residue_groups_pbar.close()
-        print(f"Now {multiconformers.natoms}")
 
         if len(segment) > 0:
             logger.debug(f"Running find_paths for segment of length {len(segment)}")
             for path in self.find_paths(segment):
-                print(f"combining {path}")
                 multiconformers = multiconformers.combine(path)
 
         logger.info(
@@ -1627,6 +1635,19 @@ class QFitLigand(_BaseQFit):
                 except Exception as exc:
                     logger.error(f'Generated an exception: {exc}')
 
+        #remove very similar conformers
+        logger.info(f"Number of generated conformers, before RMSD: {len(self._coor_set)}")
+        filtered_coor_set = []
+        filtered_b_set = []
+        if self.options.ligand_rmsd:
+            for conf in self._coor_set:
+                rmsd_values = [calc_rmsd(conf, existing_conf) for existing_conf in filtered_coor_set]
+                if all(rmsd > DEFAULT_RMSD_CUTOFF for rmsd in rmsd_values):
+                    filtered_coor_set.append(conf)
+                    filtered_b_set.append(self._bs[0])
+    
+        self._coor_set = filtered_coor_set
+        self._bs = filtered_b_set
         logger.info(f"Number of generated conformers, before scoring: {len(self._coor_set)}")
         
         if len(self._coor_set) < 1:
@@ -1646,9 +1667,29 @@ class QFitLigand(_BaseQFit):
         # Only conformeres that pass QP scoring will be rotated and translated for additional sampling 
         self.rot_trans()
 
+        #remove very similar conformers
+        logger.info(f"Number of generated conformers, before RMSD: {len(self._coor_set)}")
+        filtered_coor_set = []
+        filtered_b_set = []
+        if self.options.ligand_rmsd:
+            for conf in self._coor_set:
+                rmsd_values = [calc_rmsd(conf, existing_conf) for existing_conf in filtered_coor_set]
+                if all(rmsd > DEFAULT_RMSD_CUTOFF for rmsd in rmsd_values):
+                    filtered_coor_set.append(conf)
+                    filtered_b_set.append(self._bs[0])
+
+        self._coor_set = filtered_coor_set
+        self._bs = filtered_b_set
+        logger.info(f"Number of generated conformers, before scoring: {len(self._coor_set)}")
+
+        if len(self._coor_set) < 1:
+            logger.error("qFit-ligand failed to produce a valid conformer.")
+            return
+
+
         # MIQP score conformer occupancy
         logger.info("Solving MIQP within run.")
-        self.sample_b()
+        #self.sample_b()
         self._convert()
         if self.options.ligand_bic:
             self._solve_miqp(
@@ -1727,14 +1768,15 @@ class QFitLigand(_BaseQFit):
                 self.ligand.b = b[0]
                 if self.options.external_clash:
                     if not self._cd():
-                        if new_idx_set:  # if there are already conformers in new_idx_set
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0])
-                        else:
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0]) 
+                        if not self.ligand.clashes():
+                            if new_idx_set:  # if there are already conformers in new_idx_set
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0])
+                            else:
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0]) 
                             
                 elif not self.ligand.clashes():
                     if new_idx_set:  # if there are already conformers in new_idx_set
@@ -1837,14 +1879,15 @@ class QFitLigand(_BaseQFit):
                 self.ligand.b = b[0]
                 if self.options.external_clash:
                     if not self._cd():
-                        if new_idx_set:  # if there are already conformers in new_idx_set
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0])
-                        else:
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0]) 
+                        if not self.ligand.clashes():
+                            if new_idx_set:  # if there are already conformers in new_idx_set
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0])
+                            else:
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0]) 
                             
                 elif not self.ligand.clashes():
                     if new_idx_set:  # if there are already conformers in new_idx_set
@@ -1961,14 +2004,15 @@ class QFitLigand(_BaseQFit):
                 self.ligand.b = b[0]
                 if self.options.external_clash:
                     if not self._cd():
-                        if new_idx_set:  # if there are already conformers in new_idx_set
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0])
-                        else:
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0]) 
+                        if not self.ligand.clashes():
+                            if new_idx_set:  # if there are already conformers in new_idx_set
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0])
+                            else:
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0]) 
                 elif not self.ligand.clashes():
                     if new_idx_set:  # if there are already conformers in new_idx_set
                         new_idx_set.append(idx)
@@ -2074,14 +2118,15 @@ class QFitLigand(_BaseQFit):
                 self.ligand.b = b[0]
                 if self.options.external_clash:
                     if not self._cd():
-                        if new_idx_set:  # if there are already conformers in new_idx_set
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0])
-                        else:
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0]) 
+                        if not self.ligand.clashes():
+                            if new_idx_set:  # if there are already conformers in new_idx_set
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0])
+                            else:
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0]) 
                 elif not self.ligand.clashes():
                     if new_idx_set:  # if there are already conformers in new_idx_set
                         new_idx_set.append(idx)
@@ -2169,14 +2214,15 @@ class QFitLigand(_BaseQFit):
                 # self._cd()
                 if self.options.external_clash:
                     if not self._cd():
-                        if new_idx_set:  # if there are already conformers in new_idx_set
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0])
-                        else:
-                            new_idx_set.append(idx)
-                            new_coor_set.append(conf)
-                            new_bs.append(b[0]) 
+                        if not self.ligand.clashes():
+                            if new_idx_set:  # if there are already conformers in new_idx_set
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0])
+                            else:
+                                new_idx_set.append(idx)
+                                new_coor_set.append(conf)
+                                new_bs.append(b[0]) 
                             
                 elif not self.ligand.clashes():
                     if new_idx_set:  # if there are already conformers in new_idx_set
@@ -2220,7 +2266,9 @@ class QFitLigand(_BaseQFit):
         extended_coor_set = []
         extended_bs = [] 
         rotated_coor_set = []
-        rotated_bs = []   
+        rotated_bs = []
+        rotated_coor_set_possibilities = []
+        extended_coor_set_possibilities = []
         new_coor_set = self._coor_set
         new_bs = self._bs
 
@@ -2228,19 +2276,36 @@ class QFitLigand(_BaseQFit):
         for conf, b in zip(self._coor_set, self._bs):
             # Apply rotations to each initial conformation
             rotated_conformations = self.apply_rotations(conf, self.options.rot_range, self.options.rotation_step)
-            rotated_coor_set.extend(rotated_conformations)
-            rotated_bs.extend([b] * len(rotated_conformations))  # Extend b values for each rotated conformation
+            rotated_coor_set_possibilities.extend(rotated_conformations)
+            for idx, conf in enumerate(rotated_coor_set_possibilities):
+                self.ligand.coor = conf
+                if self.options.external_clash:
+                    if not self._cd():
+                        if not self.ligand.clashes():
+                            rotated_coor_set.append(conf)
+                            rotated_bs.append(b[0])
+                elif not self.ligand.clashes():
+                     rotated_coor_set.append(conf)
+                     rotated_bs.append(b[0])
 
         # translations 
         for conf, b in zip(self._coor_set, self._bs):
             # Apply translations to each conformation
             translated_conformations = self.apply_translations(conf, self.options.trans_range)
-            extended_coor_set.extend(translated_conformations)
-            extended_bs.extend([b] * len(translated_conformations))  # Extend b values for each translated conformation
-
-
+            extended_coor_set_possibilities.extend(translated_conformations)
+            for idx, conf in enumerate(extended_coor_set_possibilities):
+                self.ligand.coor = conf
+                if self.options.external_clash:
+                    if not self._cd():
+                        if not self.ligand.clashes():
+                            extended_coor_set.append(conf)
+                            extended_bs.append(b[0])
+                elif not self.ligand.clashes():
+                     extended_coor_set.append(conf)
+                     extended_bs.append(b[0])
+        
         self._coor_set = np.concatenate((new_coor_set, rotated_coor_set, extended_coor_set), axis=0)
-        self._bs = np.concatenate((new_bs, rotated_bs, extended_bs), axis=0)
+        self._bs = np.tile(self._bs[0], (len(self._coor_set), 1))
 
         logger.info(f"Trans/rot  search generated: {len(self._coor_set)} plausible conformers")  
         logger.info(f"bfactor shape = {np.shape(self._bs)}")
