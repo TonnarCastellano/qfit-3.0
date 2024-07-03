@@ -67,6 +67,41 @@ def build_argparser():
     )
 
     p.add_argument(
+        "-lb5",
+        "--ligand_bic_option5",
+        action="store_true",
+        help="Run ligand BIC with option 5 (note -lb flag also needs to be on)",
+    )
+
+    p.add_argument(
+        "-lb4",
+        "--ligand_bic_option4",
+        action="store_true",
+        help="Run ligand BIC with option 4 (note -lb flag also needs to be on)",
+    )
+
+    p.add_argument(
+        "-lb3",
+        "--ligand_bic_option3",
+        action="store_true",
+        help="Run ligand BIC with option 3 (note -lb flag also needs to be on)",
+    )
+
+    p.add_argument(
+        "-lb2",
+        "--ligand_bic_option2",
+        action="store_true",
+        help="Run ligand BIC with option 2 (note -lb flag also needs to be on)",
+    )
+
+    p.add_argument(
+        "-lb1",
+        "--ligand_bic_option5",
+        action="store_true",
+        help="Run ligand BIC with option 1 (note -lb flag also needs to be on)",
+    )
+
+    p.add_argument(
         "-rr",
         "--rot_range",
         type=float,
@@ -111,6 +146,12 @@ def build_argparser():
         action=ToggleActionFlag,
         default=False,
         help="Use BIC to select the most parsimonious MIQP threshold",
+    )
+    p.add_argument(
+        "--ligand_rmsd",
+        dest="ligand_rmsd",
+        action='store_true',
+        help="Turn on Ligand RMSD cutoff",
     )
     return p
 
@@ -205,7 +246,6 @@ def prepare_qfit_ligand(options):
         options.directory, f"scaled{ext}"
     )  # this should be an option
     xmap.tofile(scaled_fname)
-
     return QFitLigand(ligand, receptor, xmap, options), chainid, resi, icode, receptor
 
 
