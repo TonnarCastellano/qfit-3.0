@@ -316,7 +316,8 @@ class _BaseQFit:
         models = pd.DataFrame(self._models))
         models.to_csv("models.csv")
         targets = pd.DataFrame(self._target))
-        targets.to_csv("target.csv")        
+        targets.to_csv("target.csv") 
+        print("printing target and models")
         solver = qp_solver_class(self._target, self._models)
         solver.solve_qp()
 
