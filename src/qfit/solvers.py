@@ -166,7 +166,10 @@ class CVXPYSolver(QPSolver, MIQPSolver):
         self._objective_value = 0
         self.weights = None
 
+    
+
     def find_redundant_conformers(self, threshold=1e-6):
+        print(self.target)
         for i in range(self.nconformers):
             if i in self.redundant_indices:
                 continue
@@ -176,6 +179,7 @@ class CVXPYSolver(QPSolver, MIQPSolver):
                     continue
                 if np.linalg.norm(self.models[i] - self.models[j]) < threshold:
                     self.redundant_indices.append(j)
+                    
         assert len(self.valid_indices) + len(self.redundant_indices) == self.nconformers
 
     def compute_quadratic_coeffs(self):
