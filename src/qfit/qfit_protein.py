@@ -973,5 +973,6 @@ def main():
 
     # Run the QFitProtein job
     time0 = time.time()
+    print("is this working")
     multiconformer = qfit.run()
     logger.info(f"Total time: {time.time() - time0}s")
