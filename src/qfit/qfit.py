@@ -312,6 +312,11 @@ class _BaseQFit:
         # Create and run solver
         logger.info("Solving QP")
         qp_solver_class = get_qp_solver_class(self.options.qp_solver)
+        import pandas as pd 
+        models = pd.DataFrame(self._models))
+        models.to_csv("models.csv")
+        targets = pd.DataFrame(self._target))
+        targets.to_csv("target.csv")        
         solver = qp_solver_class(self._target, self._models)
         solver.solve_qp()
 
